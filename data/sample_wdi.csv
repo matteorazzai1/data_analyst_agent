@@ -1,0 +1,41 @@
+country,country_code,year,indicator_code,indicator_name,value
+United States,USA,2010,NY.GDP.MKTP.CD,GDP (current US$),14992052000000
+United States,USA,2020,NY.GDP.MKTP.CD,GDP (current US$),20936600000000
+China,CHN,2010,NY.GDP.MKTP.CD,GDP (current US$),6078260000000
+China,CHN,2020,NY.GDP.MKTP.CD,GDP (current US$),14722700000000
+India,IND,2010,NY.GDP.MKTP.CD,GDP (current US$),1675610000000
+India,IND,2020,NY.GDP.MKTP.CD,GDP (current US$),2669790000000
+Brazil,BRA,2010,NY.GDP.MKTP.CD,GDP (current US$),2208870000000
+Brazil,BRA,2020,NY.GDP.MKTP.CD,GDP (current US$),1444710000000
+United States,USA,2010,SP.POP.TOTL,Population total,309321666
+United States,USA,2020,SP.POP.TOTL,Population total,331449281
+China,CHN,2010,SP.POP.TOTL,Population total,1337705000
+China,CHN,2020,SP.POP.TOTL,Population total,1439323776
+India,IND,2010,SP.POP.TOTL,Population total,1234281170
+India,IND,2020,SP.POP.TOTL,Population total,1380004385
+Brazil,BRA,2010,SP.POP.TOTL,Population total,195713635
+Brazil,BRA,2020,SP.POP.TOTL,Population total,212559417
+United States,USA,2010,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),17.4
+United States,USA,2020,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),15.5
+China,CHN,2010,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),6.9
+China,CHN,2020,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),7.4
+India,IND,2010,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),1.7
+India,IND,2020,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),1.9
+Brazil,BRA,2010,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),2.0
+Brazil,BRA,2020,EN.ATM.CO2E.PC,CO2 emissions per capita (metric tons),1.8
+United States,USA,2010,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),9.6
+United States,USA,2020,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),8.1
+China,CHN,2010,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),4.1
+China,CHN,2020,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),5.2
+India,IND,2010,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),3.8
+India,IND,2020,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),7.1
+Brazil,BRA,2010,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),6.7
+Brazil,BRA,2020,SL.UEM.TOTL.ZS,Unemployment rate (% of labor force),13.5
+United States,USA,2010,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),0.1
+United States,USA,2020,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),0.1
+China,CHN,2010,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),0.3
+China,CHN,2020,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),0.2
+India,IND,2010,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),21.2
+India,IND,2020,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),10.8
+Brazil,BRA,2010,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),6.1
+Brazil,BRA,2020,SI.POV.DDAY,Poverty headcount ratio at $1.90 a day (% of population),4.4

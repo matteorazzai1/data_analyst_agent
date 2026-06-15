@@ -1,0 +1,37 @@
+[
+  {
+    "indicator_code": "NY.GDP.MKTP.CD",
+    "name": "GDP (current US$)",
+    "source_note": "Current price GDP in U.S. dollars. Comparability is limited by exchange rate valuation and national accounting methods.",
+    "topics": "Economy; National accounts",
+    "description": "Gross domestic product at market prices in current U.S. dollars."
+  },
+  {
+    "indicator_code": "SP.POP.TOTL",
+    "name": "Population, total",
+    "source_note": "Total population includes all residents regardless of legal status or citizenship. Data may be revised by national statistical offices.",
+    "topics": "Population",
+    "description": "Total population of a country, including all residents."
+  },
+  {
+    "indicator_code": "EN.ATM.CO2E.PC",
+    "name": "CO2 emissions (metric tons per capita)",
+    "source_note": "Per capita CO2 emissions from burning fossil fuels and cement production. Coverage may vary and source estimates are subject to revision.",
+    "topics": "Environment; Energy",
+    "description": "Annual CO2 emissions in metric tons per person."
+  },
+  {
+    "indicator_code": "SL.UEM.TOTL.ZS",
+    "name": "Unemployment, total (% of total labor force)",
+    "source_note": "Share of the labor force that is without work but available for and seeking employment. Definitions vary across countries.",
+    "topics": "Labor; Employment",
+    "description": "The unemployment rate as the percentage of the labor force."
+  },
+  {
+    "indicator_code": "SI.POV.DDAY",
+    "name": "Poverty headcount ratio at $1.90 a day (% of population)",
+    "source_note": "Poverty line measured in 2011 PPP international dollars. Comparisons across countries depend on PPP conversion and survey coverage.",
+    "topics": "Poverty; Social",
+    "description": "Percentage of population living below the international extreme poverty line."
+  }
+]
