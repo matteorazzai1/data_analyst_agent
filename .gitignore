@@ -1,8 +1,11 @@
 __pycache__/
 .venv/
+venv/
 *.pyc
 *.pyo
 *.pyd
 .env
+.env.local
 data/*.zip
-venv/
+data/*.json
+gradio_cached_examples/

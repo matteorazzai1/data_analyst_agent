@@ -2,3 +2,7 @@ pandas>=2.0
 scikit-learn>=1.2
 requests>=2.28
 openai>=0.30
+llama-index>=0.9
+llama-index-llms-openrouter>=0.1
+gradio>=4.0
+python-dotenv>=1.0

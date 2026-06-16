@@ -1,297 +1,284 @@
-import json
 import os
-import re
+import json
+import asyncio
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-import numpy as np
 import pandas as pd
-import requests
+import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+from llama_index.llms.openrouter import OpenRouter
+from llama_index.core.tools import FunctionTool
+from llama_index.core.agent import ReActAgent
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 SAMPLE_CSV = DATA_DIR / "sample_wdi.csv"
+FULL_WDI_CSV = DATA_DIR / "wdi_full.csv"
+WDI_FOLDER = DATA_DIR / "WDI_CSV_2026_04_09"
+WDI_MAIN_CSV = WDI_FOLDER / "WDICSV.csv"
+WDI_SERIES_CSV = WDI_FOLDER / "WDISeries.csv"
+WDI_COUNTRY_CSV = WDI_FOLDER / "WDICountry.csv"
+WDI_FOOTNOTE_CSV = WDI_FOLDER / "WDIfootnote.csv"
+WDI_COUNTRY_SERIES_CSV = WDI_FOLDER / "WDIcountry-series.csv"
+WDI_SERIES_TIME_CSV = WDI_FOLDER / "WDIseries-time.csv"
 INDICATORS_JSON = DATA_DIR / "indicators.json"
 
-DEFAULT_INDICATOR_CODES = [
-    "NY.GDP.MKTP.CD",
-    "SP.POP.TOTL",
-    "EN.ATM.CO2E.PC",
-    "SL.UEM.TOTL.ZS",
-    "SI.POV.DDAY",
-]
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_KEY")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openrouter/owl-alpha")
 
 
 class WDIStore:
-    def __init__(self):
-        self.indicators = self._load_indicators()
-        self.df = self._load_data()
-        self.vectorizer, self.tfidf = self._build_doc_index()
+    def __init__(self, csv_path: Path = None, indicators_path: Path = INDICATORS_JSON):
+        # load indicators first (needed for download and fallback only)
+        with open(indicators_path, "r", encoding="utf-8") as f:
+            self.indicators = json.load(f)
 
-    def _load_indicators(self) -> List[Dict[str, Any]]:
-        with open(INDICATORS_JSON, "r", encoding="utf-8") as handle:
-            return json.load(handle)
+        # if no csv_path provided, prefer the local WDI export folder, then full cached dataset, then sample
+        if csv_path is None:
+            if WDI_MAIN_CSV.exists():
+                csv_path = WDI_MAIN_CSV
+            elif FULL_WDI_CSV.exists():
+                csv_path = FULL_WDI_CSV
+            else:
+                print("Full WDI dataset not found. Downloading...")
+                self.download_full_wdi(FULL_WDI_CSV, limit=None)
+                if FULL_WDI_CSV.exists():
+                    csv_path = FULL_WDI_CSV
+                else:
+                    print("Download failed. Falling back to sample dataset.")
+                    csv_path = SAMPLE_CSV
 
-    def _load_data(self) -> pd.DataFrame:
-        df = pd.read_csv(SAMPLE_CSV)
-        df["year"] = df["year"].astype(int)
-        return df
+        self.df = pd.read_csv(csv_path, encoding="utf-8-sig")
+        self.series_df = self._read_csv(WDI_SERIES_CSV)
+        self.country_df = self._read_csv(WDI_COUNTRY_CSV)
+        self.footnote_df = self._read_csv(WDI_FOOTNOTE_CSV)
+        self.country_series_df = self._read_csv(WDI_COUNTRY_SERIES_CSV)
+        self.series_time_df = self._read_csv(WDI_SERIES_TIME_CSV)
 
-    def _build_doc_index(self):
-        texts = []
-        for indicator in self.indicators:
-            text = " ".join(
-                [indicator["name"], indicator["source_note"], indicator.get("topics", "")]
-            )
-            texts.append(text)
+        if csv_path == WDI_MAIN_CSV:
+            self._normalize_wdi_csv()
 
-        vectorizer = TfidfVectorizer(stop_words="english")
-        tfidf = vectorizer.fit_transform(texts)
-        return vectorizer, tfidf
+        if "year" in self.df.columns:
+            try:
+                self.df["year"] = self.df["year"].astype(int)
+            except Exception:
+                pass
 
-    def retrieve_docs(self, query: str, top_n: int = 3) -> List[Dict[str, Any]]:
-        query_vec = self.vectorizer.transform([query])
-        scores = cosine_similarity(query_vec, self.tfidf).flatten()
-        ranked = scores.argsort()[::-1][:top_n]
-        results = []
-        for i in ranked:
-            indicator = self.indicators[i].copy()
-            indicator["score"] = float(scores[i])
-            results.append(indicator)
-        return results
-
-    def get_indicator(self, code: str) -> Optional[Dict[str, Any]]:
-        for indicator in self.indicators:
-            if indicator["indicator_code"] == code:
-                return indicator
+        self._build_index()
+    
+    def download_full_wdi(self, out_csv: Path, indicators: List[str] = None, limit: int = None):
+        """Download WDI data for a list of indicators via World Bank bulk CSV endpoint.
+        
+        This may be slow and produce a large file. The function writes `out_csv` as a merged CSV.
+        Use `limit` to restrict number of indicators for testing.
+        """
+        import requests
+        import zipfile
+        import io
+        
+        codes = indicators if indicators else [ind.get("indicator_code") or ind.get("id") for ind in self.indicators]
+        if limit:
+            codes = codes[:limit]
+        
+        rows = []
+        for idx, code in enumerate(codes, 1):
+            try:
+                print(f"Downloading indicator {idx}/{len(codes)}: {code}...")
+                url = f"https://api.worldbank.org/v2/country/all/indicator/{code}?downloadformat=csv"
+                resp = requests.get(url, timeout=30)
+                if resp.status_code != 200:
+                    continue
+                z = zipfile.ZipFile(io.BytesIO(resp.content))
+                # find the data file inside zip (usually has 'API_' prefix)
+                data_files = [n for n in z.namelist() if n.endswith('.csv') and 'Metadata' not in n]
+                if not data_files:
+                    continue
+                with z.open(data_files[0]) as fh:
+                    df_part = pd.read_csv(fh, encoding='latin1')
+                    rows.append(df_part)
+            except Exception as e:
+                print(f"  Failed: {e}")
+                continue
+        
+        if rows:
+            print(f"Merging {len(rows)} indicator files...")
+            merged = pd.concat(rows, ignore_index=True)
+            merged.to_csv(out_csv, index=False)
+            print(f"Full WDI dataset saved to {out_csv}")
+            return out_csv
         return None
 
-    def print_data_summary(self) -> None:
-        print("Dataset summary")
-        print(self.df["indicator_code"].value_counts())
+    def _read_csv(self, path: Path, **kwargs) -> pd.DataFrame:
+        if path.exists():
+            return pd.read_csv(path, encoding="utf-8-sig", **kwargs)
+        return None
 
+    def _normalize_wdi_csv(self):
+        year_cols = [c for c in self.df.columns if c.isdigit()]
+        if not year_cols:
+            return
 
-class QueryPlanner:
-    DATA_TERMS = [
-        "what", "compare", "trend", "highest", "lowest", "average", "mean", "total", "difference",
-        "growth", "increase", "decrease", "year", "value", "under", "above", "between", "change",
-        "versus", "vs", "rank", "top", "bottom",
-    ]
-    DOCS_TERMS = [
-        "definition", "meaning", "indicator", "methodology", "source", "caveat", "note", "notes",
-        "comparability", "comparable", "revision", "quality", "coverage", "metadata", "interpretation",
-        "why", "explain", "explanation", "use", "definition",
-    ]
+        id_vars = [c for c in self.df.columns if c not in year_cols]
+        self.df = self.df.melt(
+            id_vars=id_vars,
+            value_vars=year_cols,
+            var_name="year",
+            value_name="value",
+        )
+        self.df["year"] = pd.to_numeric(self.df["year"], errors="coerce").astype("Int64")
 
-    def classify(self, query: str) -> str:
-        text = query.lower()
-        data_score = sum(term in text for term in self.DATA_TERMS)
-        docs_score = sum(term in text for term in self.DOCS_TERMS)
+    def _build_index(self):
+        texts = []
+        self.index_items = []
 
-        if docs_score and not data_score:
-            return "docs"
-        if data_score and not docs_score:
-            return "data"
-        if docs_score and data_score:
-            return "both"
-        return "both"
-
-
-class CodeGenerator:
-    def __init__(self, store: WDIStore):
-        self.store = store
-
-    def _openai_generate(self, question: str) -> Optional[str]:
-        try:
-            import openai
-
-            openai.api_key = OPENAI_API_KEY
-            system = (
-                "You are a Python developer who answers data questions by generating a small Python snippet. "
-                "The only allowed variables are df (a pandas DataFrame), pd, and np. "
-                "Return only valid Python code that assigns the final answer to a variable named result. "
-                "Do not import modules or print anything."
-            )
-            prompt = (
-                f"DataFrame df has columns: country, country_code, year, indicator_code, indicator_name, value. "
-                f"Write Python code to answer the question: {question}\n"
-                "The code should compute a meaningful value and assign it to result. "
-                "If the question is too vague for the available sample data, assign a descriptive string to result."
-            )
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-                max_tokens=300,
-                temperature=0,
-            )
-            text = response.choices[0].message.content
-            return text
-        except Exception:
-            return None
-
-    def _heuristic_code(self, question: str) -> str:
-        q = question.lower()
-        if "renewable" in q or "renewables" in q:
-            return "result = 'La domanda richiede un indicatore non disponibile nel campione WDI fornito.'\n"
-
-        if "gdp" in q or "ny.gdp.mktp.cd" in q or "gross domestic product" in q:
-            indicator_code = "NY.GDP.MKTP.CD"
-        elif "population" in q or "sp.pop.totl" in q:
-            indicator_code = "SP.POP.TOTL"
-        elif "co2" in q or "emissions" in q or "en.atm.co2e.pc" in q:
-            indicator_code = "EN.ATM.CO2E.PC"
-        elif "unemploy" in q or "sl.uem.totl.zs" in q:
-            indicator_code = "SL.UEM.TOTL.ZS"
-        elif "poverty" in q or "si.pov.dday" in q:
-            indicator_code = "SI.POV.DDAY"
+        if self.series_df is not None:
+            clean = self.series_df.rename(columns=lambda c: c.strip())
+            for _, row in clean.iterrows():
+                text = " ".join(
+                    str(row.get(col, "") or "")
+                    for col in [
+                        "Indicator Name",
+                        "Short definition",
+                        "Long definition",
+                        "Other notes",
+                        "Source",
+                        "Statistical concept and methodology",
+                        "Development relevance",
+                    ]
+                )
+                texts.append(text)
+                self.index_items.append({
+                    "indicator_code": row.get("Series Code"),
+                    "indicator_name": row.get("Indicator Name"),
+                    "short_definition": row.get("Short definition"),
+                    "long_definition": row.get("Long definition"),
+                    "source": row.get("Source"),
+                })
         else:
-            indicator_code = None
+            for ind in self.indicators:
+                texts.append(" ".join([ind.get("name", ""), ind.get("source_note", ""), ind.get("description", "")] ))
+                self.index_items.append(ind)
 
-        countries = [c.lower() for c in self.store.df["country"].unique()]
-        selected_countries = [c for c in countries if c in q]
-        country_filter = ""
-        if selected_countries:
-            quoted = ", ".join(repr(c.title()) for c in selected_countries)
-            country_filter = f" & df['country'].isin([{quoted}])"
+        self.vectorizer = TfidfVectorizer(stop_words="english")
+        if texts:
+            self.tfidf = self.vectorizer.fit_transform(texts)
+        else:
+            self.tfidf = None
 
-        if "compare" in q or "vs" in q or "versus" in q or "between" in q:
-            code = (
-                "indicator_code = '{}'\n"
-                "subset = df[(df['indicator_code'] == indicator_code ){}]\n"
-                "result = subset.sort_values(['year', 'country']).head(20).to_dict(orient='records')\n"
-            ).format(indicator_code, country_filter)
-            return code
-
-        match = re.search(r"(\d{4})", question)
-        if match and indicator_code:
-            year = match.group(1)
-            code = (
-                "indicator_code = '{}'\n"
-                "subset = df[(df['indicator_code'] == indicator_code ) & (df['year'] == {}){}]\n"
-                "result = subset[['country', 'year', 'value']].to_dict(orient='records')\n"
-            ).format(indicator_code, year, country_filter)
-            return code
-
-        if indicator_code:
-            code = (
-                "indicator_code = '{}'\n"
-                "subset = df[(df['indicator_code'] == indicator_code ){}]\n"
-                "result = subset.groupby('country')['value'].mean().round(3).to_dict()\n"
-            ).format(indicator_code, country_filter)
-            return code
-
-        return "result = 'Non riesco a costruire una query chiara con i dati disponibili.'\n"
-
-    def synthesize(self, question: str) -> str:
-        if OPENAI_API_KEY:
-            generated = self._openai_generate(question)
-            if generated:
-                return generated
-        return self._heuristic_code(question)
+    def retrieve_docs(self, query: str, top_n: int = 5) -> List[Dict[str, Any]]:
+        """Retrieve top indicator documentation entries matching the query using TF-IDF similarity."""
+        if self.tfidf is None:
+            return []
+        qv = self.vectorizer.transform([query])
+        scores = cosine_similarity(qv, self.tfidf).flatten()
+        idx = scores.argsort()[::-1][:top_n]
+        res = []
+        for i in idx:
+            item = dict(self.index_items[i])
+            item["score"] = float(scores[i])
+            res.append(item)
+        return res
 
 
-class Sandbox:
-    @staticmethod
-    def run(code: str, df: pd.DataFrame) -> Any:
-        safe_globals = {
-            "pd": pd,
-            "np": np,
-            "df": df.copy(),
-            "__builtins__": {
-                "len": len,
-                "min": min,
-                "max": max,
-                "sum": sum,
-                "round": round,
-                "sorted": sorted,
-                "list": list,
-                "dict": dict,
-                "float": float,
-                "int": int,
-                "str": str,
-            },
-        }
-        local = {}
+def run_python_sandbox(code: str, df: pd.DataFrame) -> str:
+    """Execute provided python snippet in a restricted sandbox and return result as string."""
+    safe_globals = {
+        "pd": pd,
+        "np": np,
+        "df": df.copy(),
+        "__builtins__": {
+            "len": len,
+            "min": min,
+            "max": max,
+            "sum": sum,
+            "round": round,
+            "sorted": sorted,
+            "list": list,
+            "dict": dict,
+            "float": float,
+            "int": int,
+            "str": str,
+        },
+    }
+    local = {}
+    try:
         exec(code, safe_globals, local)
-        if "result" not in local:
-            raise ValueError("Il codice eseguito non ha assegnato 'result'.")
-        return local["result"]
+        if "result" in local:
+            return json.dumps(local["result"], default=str, ensure_ascii=False)
+        else:
+            return "Error: executed code did not assign 'result' variable."
+    except Exception as e:
+        return f"Execution error: {str(e)}"
 
 
 class DataAnalystAgent:
+    """Agent that uses OpenRouter LLM + llama_index tooling to combine RAG and code execution."""
+
     def __init__(self):
         self.store = WDIStore()
-        self.planner = QueryPlanner()
-        self.generator = CodeGenerator(self.store)
+        # init OpenRouter LLM wrapper
+        self.llm = OpenRouter(api_key=OPENROUTER_API_KEY, max_tokens=1024, context_window=4096, model=OPENROUTER_MODEL)
 
-    def answer(self, question: str) -> Dict[str, Any]:
-        plan = self.planner.classify(question)
-        docs = []
-        data_result = None
-        code = None
-        errors = []
+        # define tools
+        self.retrieve_docs_tool = FunctionTool.from_defaults(
+            fn=self._retrieve_docs_wrapper,
+            name="retrieve_docs",
+            description="Retrieve top indicator documentation entries matching the query. Input: a short query string. Returns JSON string of top results.",
+        )
 
-        if plan in ("docs", "both"):
-            docs = self.store.retrieve_docs(question, top_n=3)
+        self.run_python_tool = FunctionTool.from_defaults(
+            fn=self._run_python_wrapper,
+            name="run_python",
+            description="Execute a small Python snippet operating on the in-memory DataFrame `df`. The snippet must assign the final answer to a variable named `result`. Input: code string. Returns serialized result.",
+        )
 
-        if plan in ("data", "both"):
-            code = self.generator.synthesize(question)
-            try:
-                data_result = Sandbox.run(code, self.store.df)
-            except Exception as exc:
-                errors.append(str(exc))
-                data_result = None
+        # build ReAct agent
+        self.agent = ReActAgent.from_tools(
+            tools=[self.retrieve_docs_tool, self.run_python_tool],
+            llm=self.llm,
+            verbose=False,
+            max_iterations=6,
+        )
 
-        return {
-            "question": question,
-            "plan": plan,
-            "docs": docs,
-            "data_result": data_result,
-            "code": code,
-            "errors": errors,
-        }
+    def _retrieve_docs_wrapper(self, query: str) -> str:
+        docs = self.store.retrieve_docs(query, top_n=5)
+        return json.dumps(docs, ensure_ascii=False)
 
-    def format_answer(self, result: Dict[str, Any]) -> str:
-        lines = [f"Question: {result['question']}", f"Plan: {result['plan']}\n"]
-        if result["docs"]:
-            lines.append("Document retrieval:")
-            for doc in result["docs"]:
-                lines.append(f"- {doc['indicator_code']}: {doc['name']}")
-                lines.append(f"  Note: {doc['source_note']}")
-            lines.append("")
-        if result["data_result"] is not None:
-            lines.append("Data result:")
-            lines.append(str(result["data_result"]))
-            lines.append("")
-        if result["errors"]:
-            lines.append("Errors:")
-            lines.extend(result["errors"])
-            lines.append("")
-        if result["code"]:
-            lines.append("Executed code:")
-            lines.append(result["code"].strip())
-        return "\n".join(lines)
+    def _run_python_wrapper(self, code: str) -> str:
+        return run_python_sandbox(code, self.store.df)
+
+    async def aquery(self, question: str) -> str:
+        """Asynchronously send a question to the ReActAgent and return textual response."""
+        response = await self.agent.aquery(question)
+        # attempt to extract text
+        try:
+            text = str(response.response)
+        except Exception:
+            text = str(response)
+        return text
+
+    def query(self, question: str, timeout: int = 30) -> str:
+        """Sync wrapper around async aquery."""
+        return asyncio.run(self.aquery(question))
 
 
-def interactive_loop():
+def interactive():
     agent = DataAnalystAgent()
-    print("Data Analyst Agent — WDI sample. Digita 'exit' per uscire.")
+    print("Data Analyst Agent (OpenRouter + llama_index). Type 'exit' to quit.")
     while True:
-        question = input("Domanda> ").strip()
-        if not question or question.lower() in {"exit", "quit"}:
+        q = input("Question> ").strip()
+        if not q or q.lower() in {"exit", "quit"}:
             break
-        answer = agent.answer(question)
-        print(agent.format_answer(answer))
-        print("---")
-
-
-def main():
-    interactive_loop()
+        print("Thinking... (this may take a few seconds)")
+        try:
+            ans = agent.query(q)
+            print(ans)
+        except Exception as e:
+            print(f"Agent error: {e}")
 
 
 if __name__ == "__main__":
-    main()
+    interactive()

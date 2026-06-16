@@ -4,13 +4,15 @@ Progetto take-home: agente AI per rispondere a domande in linguaggio naturale su
 
 ## Obiettivo
 
-Questo repo dimostra un agente che combina:
+Questo repo dimostra due implementazioni di un agente che combina:
 
-- esecuzione di codice su dati tabellari in sandbox
-- retrieval da un corpus di documentazione tecnica su indicatori WDI
-- decisione automatica su quando usare dati, documentazione o entrambi
+- esecuzione di codice su dati tabellari in sandbox (prototipo semplice)
+- retrieval da un corpus di documentazione tecnica su indicatori WDI (prototipo semplice)
+- **ReActAgent con World Bank API live** (OpenRouter, production-ready)
 
 ## Come usare
+
+### Versione semplice (prototipo offline)
 
 1. Creare un ambiente Python:
 
@@ -32,18 +34,48 @@ python examples\run_examples.py
 python agent.py
 ```
 
-## OpenAI (opzionale)
+### Versione OpenRouter (full WDI API, Gradio UI)
 
-Se vuoi usare un modello OpenAI per la comprensione delle query e la generazione di codice, esporta `OPENAI_API_KEY`:
+1. Setup:
 
 ```powershell
-$env:OPENAI_API_KEY = "sk-..."
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-Se non è disponibile, l'agente userà una modalità fallback basata su euristiche.
+2. Configurare la API key:
 
-## Dati
+Crea un file `.env`:
 
-Il repository include un campione rappresentativo di WDI in `data/sample_wdi.csv` e documentazione indicatori in `data/indicators.json`.
+```
+OPENROUTER_API_KEY=sk-or-v1-...
+```
 
-Con più tempo, il codice può essere esteso per scaricare *tutti* i dati WDI dal World Bank API.
+Oppure esporta direttamente:
+
+```powershell
+$env:OPENROUTER_API_KEY = "sk-or-v1-..."
+```
+
+3. Avviare l'agente con Gradio:
+
+```powershell
+python agent_openrouter.py
+```
+
+Apri browser a `http://localhost:7860`
+
+## Dataset
+
+Il repository include:
+
+- **Versione semplice**: campione rappresentativo in `data/sample_wdi.csv` (offline, eseguibile da zero)
+- **Versione OpenRouter**: accesso live a World Bank API (`https://api.worldbank.org/v2`)
+  - Cache locale di indicatori e paesi per performance
+  - Dati in real-time per query specifiche
+
+## OpenAI vs OpenRouter
+
+- **Versione semplice** (`agent.py`): supporta OpenAI se `OPENAI_API_KEY` è disponibile, altrimenti usa euristiche
+- **Versione OpenRouter** (`agent_openrouter.py`): richiede `OPENROUTER_API_KEY`, usa owl-alpha model e ReActAgent da llama_index
