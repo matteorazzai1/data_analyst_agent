@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Dict, List
 
+from dotenv import load_dotenv
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -13,10 +14,13 @@ from llama_index.llms.openrouter import OpenRouter
 from llama_index.core.tools import FunctionTool
 from llama_index.core.agent import ReActAgent
 
+print(ReActAgent)
+print(ReActAgent.__module__)
+
+
+load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-SAMPLE_CSV = DATA_DIR / "sample_wdi.csv"
-FULL_WDI_CSV = DATA_DIR / "wdi_full.csv"
 WDI_FOLDER = DATA_DIR / "WDI_CSV_2026_04_09"
 WDI_MAIN_CSV = WDI_FOLDER / "WDICSV.csv"
 WDI_SERIES_CSV = WDI_FOLDER / "WDISeries.csv"
@@ -24,32 +28,26 @@ WDI_COUNTRY_CSV = WDI_FOLDER / "WDICountry.csv"
 WDI_FOOTNOTE_CSV = WDI_FOLDER / "WDIfootnote.csv"
 WDI_COUNTRY_SERIES_CSV = WDI_FOLDER / "WDIcountry-series.csv"
 WDI_SERIES_TIME_CSV = WDI_FOLDER / "WDIseries-time.csv"
-INDICATORS_JSON = DATA_DIR / "indicators.json"
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENROUTER_KEY")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openrouter/owl-alpha")
 
+if not OPENROUTER_API_KEY:
+    raise EnvironmentError(
+        "Missing OpenRouter API key. Set OPENROUTER_API_KEY in your environment or add it to a .env file."
+    )
+
 
 class WDIStore:
-    def __init__(self, csv_path: Path = None, indicators_path: Path = INDICATORS_JSON):
-        # load indicators first (needed for download and fallback only)
-        with open(indicators_path, "r", encoding="utf-8") as f:
-            self.indicators = json.load(f)
-
-        # if no csv_path provided, prefer the local WDI export folder, then full cached dataset, then sample
+    def __init__(self, csv_path: Path = None):
+        # Use only the imported WDI dataset files present in WDI_CSV_2026_04_09.
         if csv_path is None:
-            if WDI_MAIN_CSV.exists():
-                csv_path = WDI_MAIN_CSV
-            elif FULL_WDI_CSV.exists():
-                csv_path = FULL_WDI_CSV
-            else:
-                print("Full WDI dataset not found. Downloading...")
-                self.download_full_wdi(FULL_WDI_CSV, limit=None)
-                if FULL_WDI_CSV.exists():
-                    csv_path = FULL_WDI_CSV
-                else:
-                    print("Download failed. Falling back to sample dataset.")
-                    csv_path = SAMPLE_CSV
+            csv_path = WDI_MAIN_CSV
+
+        if not csv_path.exists():
+            raise FileNotFoundError(
+                f"Required dataset file not found: {csv_path}."
+            )
 
         self.df = pd.read_csv(csv_path, encoding="utf-8-sig")
         self.series_df = self._read_csv(WDI_SERIES_CSV)
@@ -69,48 +67,6 @@ class WDIStore:
 
         self._build_index()
     
-    def download_full_wdi(self, out_csv: Path, indicators: List[str] = None, limit: int = None):
-        """Download WDI data for a list of indicators via World Bank bulk CSV endpoint.
-        
-        This may be slow and produce a large file. The function writes `out_csv` as a merged CSV.
-        Use `limit` to restrict number of indicators for testing.
-        """
-        import requests
-        import zipfile
-        import io
-        
-        codes = indicators if indicators else [ind.get("indicator_code") or ind.get("id") for ind in self.indicators]
-        if limit:
-            codes = codes[:limit]
-        
-        rows = []
-        for idx, code in enumerate(codes, 1):
-            try:
-                print(f"Downloading indicator {idx}/{len(codes)}: {code}...")
-                url = f"https://api.worldbank.org/v2/country/all/indicator/{code}?downloadformat=csv"
-                resp = requests.get(url, timeout=30)
-                if resp.status_code != 200:
-                    continue
-                z = zipfile.ZipFile(io.BytesIO(resp.content))
-                # find the data file inside zip (usually has 'API_' prefix)
-                data_files = [n for n in z.namelist() if n.endswith('.csv') and 'Metadata' not in n]
-                if not data_files:
-                    continue
-                with z.open(data_files[0]) as fh:
-                    df_part = pd.read_csv(fh, encoding='latin1')
-                    rows.append(df_part)
-            except Exception as e:
-                print(f"  Failed: {e}")
-                continue
-        
-        if rows:
-            print(f"Merging {len(rows)} indicator files...")
-            merged = pd.concat(rows, ignore_index=True)
-            merged.to_csv(out_csv, index=False)
-            print(f"Full WDI dataset saved to {out_csv}")
-            return out_csv
-        return None
-
     def _read_csv(self, path: Path, **kwargs) -> pd.DataFrame:
         if path.exists():
             return pd.read_csv(path, encoding="utf-8-sig", **kwargs)
@@ -157,11 +113,7 @@ class WDIStore:
                     "long_definition": row.get("Long definition"),
                     "source": row.get("Source"),
                 })
-        else:
-            for ind in self.indicators:
-                texts.append(" ".join([ind.get("name", ""), ind.get("source_note", ""), ind.get("description", "")] ))
-                self.index_items.append(ind)
-
+        
         self.vectorizer = TfidfVectorizer(stop_words="english")
         if texts:
             self.tfidf = self.vectorizer.fit_transform(texts)
@@ -236,12 +188,15 @@ class DataAnalystAgent:
         )
 
         # build ReAct agent
-        self.agent = ReActAgent.from_tools(
+        self.agent = ReActAgent(
+            name="DataAnalystAgent",
             tools=[self.retrieve_docs_tool, self.run_python_tool],
             llm=self.llm,
-            verbose=False,
-            max_iterations=6,
+            verbose=True,
+            max_iterations=5
         )
+
+        print(dir(self.agent))
 
     def _retrieve_docs_wrapper(self, query: str) -> str:
         docs = self.store.retrieve_docs(query, top_n=5)
@@ -251,18 +206,38 @@ class DataAnalystAgent:
         return run_python_sandbox(code, self.store.df)
 
     async def aquery(self, question: str) -> str:
-        """Asynchronously send a question to the ReActAgent and return textual response."""
-        response = await self.agent.aquery(question)
-        # attempt to extract text
         try:
-            text = str(response.response)
-        except Exception:
-            text = str(response)
-        return text
+            response = await self.agent.run(
+                user_msg=question,
+                max_iterations=5,
+                early_stopping_method="generate",
+            )
+            return str(response)
+        except Exception as e:
+            # If the workflow still hits iteration limits, retry with an explicit
+            # early stopping method to force generation of a final answer.
+            msg = str(e)
+            if "Max iterations" in msg or "max_iterations" in msg:
+                response = await self.agent.run(user_msg=question, early_stopping_method="generate")
+                return str(response)
+            raise
 
     def query(self, question: str, timeout: int = 30) -> str:
         """Sync wrapper around async aquery."""
         return asyncio.run(self.aquery(question))
+
+    def answer(self, question: str, timeout: int = 30) -> str:
+        """Compatibility helper for run_examples.py."""
+        return self.query(question, timeout=timeout)
+
+    def format_answer(self, answer: Any) -> str:
+        """Normalize returned answers for printing."""
+        if isinstance(answer, str):
+            return answer
+        try:
+            return str(answer)
+        except Exception:
+            return json.dumps(answer, ensure_ascii=False)
 
 
 def interactive():
@@ -275,6 +250,7 @@ def interactive():
         print("Thinking... (this may take a few seconds)")
         try:
             ans = agent.query(q)
+            print("Answer://///////////////////////////////////\n")
             print(ans)
         except Exception as e:
             print(f"Agent error: {e}")
