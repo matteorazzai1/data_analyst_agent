@@ -49,6 +49,10 @@ OPENROUTER_MODEL=openrouter/owl-alpha
 EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2
 ```
 
+### 5. Import dataset
+
+Create a data directory in the root of the project and extract the contents of WDI_CSV_2026_04_09.zip into it.
+
 ## 📁 Project Structure
 
 ```
