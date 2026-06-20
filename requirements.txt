@@ -6,3 +6,5 @@ llama-index>=0.9
 llama-index-llms-openrouter>=0.1
 gradio>=4.0
 python-dotenv>=1.0
+sentence-transformers>=2.2
+faiss-cpu>=1.7
