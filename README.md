@@ -228,19 +228,7 @@ The system prompt provides explicit decision rules to prevent the agent from cho
 
 ## 📚 Documentation
 
-Generate a comprehensive DOCX documentation file:
-
-```bash
-pip install python-docx
-python doc.py
-```
-
-This creates `DataAnalystAgent_Documentazione.docx` with:
-- Full architecture diagrams
-- Design decisions and trade-offs
-- Chunking strategies
-- Future improvements
-- Spec-Driven Development notes
+DataAnalystAgent_Documentazione2.pdf
 
 ## 🔒 Sandbox Security
 

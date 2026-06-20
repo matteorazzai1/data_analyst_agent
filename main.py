@@ -12,7 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from agent import DataAnalystAgent, EXAMPLES
+from agent.agent import DataAnalystAgent
+from agent.config import EXAMPLES
 
 # Global agent instance (initialized once)
 agent_instance = None
